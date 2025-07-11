@@ -58,30 +58,6 @@ def compute_settlement_date(trade_date, t_plus=1):
             business_days_added += 1
     return settlement_date.strftime('%Y%m%d')
 
-# ---------------- Yield and Price Functions ----------------Add commentMore actions
-def accrual_period(begin, settle, next_coupon, day_count=1):
-    """
-    Computes the accrual period.
-    For day_count==1, uses Actual/Actual.
-    Otherwise, assumes a 30/360 convention.
-    """
-    if day_count == 1:
-        L = datetime.strptime(str(begin), '%Y%m%d')
-        S = datetime.strptime(str(settle), '%Y%m%d')
-        N = datetime.strptime(str(next_coupon if next_coupon is not None else settle), '%Y%m%d')
-        return (S - L).days / (N - L).days
-    else:
-        # 30/360 convention
-        L = [int(begin[:4]), int(begin[4:6]), int(begin[6:8])]
-        S = [int(settle[:4]), int(settle[4:6]), int(settle[6:8])]
-        return (360 * (S[0] - L[0]) + 30 * (S[1] - L[1]) + S[2] - L[2]) / 180
-
-def AInt(cpn, period=2, begin=None, settle=None, next_coupon=None, day_count=1):
-    """
-    Computes the accrued interest.
-    """
-    v = accrual_period(begin, settle, next_coupon, day_count)
-    return cpn / period * v
 
 def accrual_period(begin, settle, next_coupon, day_count=1):
     """
@@ -109,9 +85,8 @@ def AInt(cpn, period=2, begin=None, settle=None, next_coupon=None, day_count=1):
 
 def BPrice(cpn, term, yield_, period=2, begin=None, settle=None, next_coupon=None, day_count=1):
     """
-    Calculates the theoretical bond price (clean price). Rounds the term using round_ytm
-    and computes the total coupon periods as an integer.
-    If begin, settle, and next_coupon are provided, adjusts for accrued interest.
+    Calculates the theoretical bond price (implied price). Rounds the term using round_ytm
+    and computes the total coupon periods as an integer. If begin, settle, and next_coupon are provided, adjusts for accrued interest.
     """
     if term is None or yield_ is None:
         return None
@@ -131,7 +106,7 @@ def BPrice(cpn, term, yield_, period=2, begin=None, settle=None, next_coupon=Non
 
     if begin and settle and next_coupon:
         v = accrual_period(begin, settle, next_coupon, day_count)
-        price = pow(1 + Y, v) * price - v * C
+        price = pow(1 + Y, v) * price - (v * C)
 
     return price
 
@@ -294,12 +269,8 @@ def calculate_bond_metrics(face_value, market_price, issue_date_str, maturity_da
                                            settle, coupon_next_date_str, day_count)
     approx_convexity = approximate_convexity(coupon_rate, time_to_maturity, yield_to_maturity, periods_per_year, begin,
                                              settle, coupon_next_date_str, day_count)
-    return {
-        "time_to_maturity": time_to_maturity,
-        "accrued_interest": accrued_interest,
-        "yield_to_maturity": ytm,
-        "clean_price": bond_price,
-        "dirty_price": bond_price,
+    return {"time_to_maturity": time_to_maturity,"accrued_interest": accrued_interest,
+        "yield_to_maturity": ytm,"clean_price": bond_price, "dirty_price": bond_price,
         "macaulay_duration": macaulay_duration,
         "modified_duration": modified_duration,
         "convexity": convexity,

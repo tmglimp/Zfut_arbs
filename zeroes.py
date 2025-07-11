@@ -2,20 +2,15 @@ import os
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# ────────────────────────────────────────────────────────
-# configuration
-# ────────────────────────────────────────────────────────
+# ─── Configuration ───
 client_id = ""
 client_secret = ""
 tcf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TCF.xlsx")
 output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "UST.index.csv")
 
-# ────────────────────────────────────────────────────────
-# utilities
-# ────────────────────────────────────────────────────────
-
+# ─── Utilities ───
 def convert_date_format(iso_date):
     try:
         return datetime.strptime(iso_date, "%Y-%m-%d").strftime("%m/%d/%Y")
@@ -74,18 +69,22 @@ def compute_cf(coupon_rate, prev_cpn, next_cpn, mat_date, yield_rate=0.06):
     return pv / 100.0
 
 def get_coupon_bounds(firstInterestPaymentDate, years_to_maturity, original_maturity):
-    if pd.isna(firstInterestPaymentDate):
+    if pd.isna(firstInterestPaymentDate) or pd.isna(years_to_maturity) or pd.isna(original_maturity):
         return None, None
 
-    dt = parse_date(firstInterestPaymentDate)
+    try:
+        anchor = parse_date(firstInterestPaymentDate)
+    except:
+        return None, None
 
-    if original_maturity - years_to_maturity < 0.5:
-        prev_coupon = dt
-        next_coupon = dt + timedelta(days=182.625)
-    else:
-        n = years_to_maturity * 2
-        prev_coupon = dt + timedelta(days=int(np.floor(n) * 182.625))
-        next_coupon = dt + timedelta(days=int(np.ceil(n) * 182.625))
+    elapsed_years = original_maturity - years_to_maturity
+    periods_elapsed = elapsed_years / 0.5  # semiannual periods
+
+    prev_offset = int(np.floor(periods_elapsed)) * 6
+    next_offset = int(np.ceil(periods_elapsed)) * 6
+
+    prev_coupon = add_months(anchor, prev_offset)
+    next_coupon = add_months(anchor, next_offset)
 
     return prev_coupon, next_coupon
 
@@ -100,26 +99,18 @@ def query_security_detail(cusip, issue_date):
     response.raise_for_status()
     return response.json()
 
-# ────────────────────────────────────────────────────────
-# main logic
-# ────────────────────────────────────────────────────────
-
+# ─── Main Logic ───
 def fetch_treasury_data():
     df = pd.read_excel(tcf_path, sheet_name="Security Database", header=2)
-    cols_to_keep = [
-        "OTR Issue", "Original Maturity", "Coupon", "Issue\nDate", "Maturity\nDate", "CUSIP",
-        "Adjusted\nIssuance\n(Billions)", "Original Issuance (Billions)"
-    ]
+    cols_to_keep = ["OTR Issue", "Original Maturity", "Coupon", "Issue\nDate", "Maturity\nDate", "CUSIP",
+        "Adjusted\nIssuance\n(Billions)", "Original Issuance (Billions)"]
     df = df[cols_to_keep].copy()
-    df.columns = [
-        "otr_issue", "original_maturity", "coupon", "issue_date_raw", "maturity_date", "cusip",
-        "adjusted_issuance_billions", "original_issuance_billions"
-    ]
+    df.columns = ["otr_issue", "original_maturity", "coupon", "issue_date_raw", "maturity_date", "cusip", "adjusted_issuance_billions", "original_issuance_billions"]
     df = df.dropna(subset=["cusip", "maturity_date"]).copy()
     df["maturity_date"] = pd.to_datetime(df["maturity_date"], errors="coerce")
     df["issue_date"] = df["issue_date_raw"].dt.strftime("%Y-%m-%d")
     df["years_to_maturity"] = (df["maturity_date"] - pd.Timestamp.today()).dt.days / 365.25
-    df = df[df["years_to_maturity"] <= 10.05].copy()
+    df = df[df["years_to_maturity"] <= 11].copy()
     df["cusip"] = df["cusip"].astype(str).str.strip()
 
     results = []
@@ -138,54 +129,38 @@ def fetch_treasury_data():
             print(f"Failed for {cusip}/{issue_date}: {e}")
 
     df_results = pd.DataFrame(results)
-    df_comb = df.merge(df_results, on="cusip", how="left")
-    df_comb = df_comb.loc[:, ~df_comb.columns.duplicated()]
+    df_parse = df.merge(df_results, on="cusip", how="left")
+    df_parse = df_parse.loc[:, ~df_parse.columns.duplicated()]
 
-    df_comb["firstInterestPaymentDate"] = pd.to_datetime(df_comb["firstInterestPaymentDate"], errors="coerce")
-    df_comb["firstInterestPaymentDate"] = df_comb["firstInterestPaymentDate"].dt.strftime("%Y-%m-%d")
-    df_comb["maturity_date"] = pd.to_datetime(df_comb["maturity_date"], errors="coerce")
-    df_comb["maturity_date"] = df_comb["maturity_date"].dt.strftime("%Y-%m-%d")
+    df_parse["firstInterestPaymentDate"] = pd.to_datetime(df_parse["firstInterestPaymentDate"], errors="coerce")
+    df_parse["firstInterestPaymentDate"] = df_parse["firstInterestPaymentDate"].dt.strftime("%Y-%m-%d")
+    df_parse["maturity_date"] = pd.to_datetime(df_parse["maturity_date"], errors="coerce")
+    df_parse["maturity_date"] = df_parse["maturity_date"].dt.strftime("%Y-%m-%d")
+    df_parse[["prev_coupon", "next_coupon"]] = df_parse.apply(lambda r: pd.Series(get_coupon_bounds(r["firstInterestPaymentDate"], r["years_to_maturity"], r["original_maturity"])),axis=1)
+    df_parse["conversion_factor"] = df_parse.apply(lambda row: round(compute_cf(row["coupon"], row["prev_coupon"], row["next_coupon"], row["maturity_date"]), 6)
 
-    df_comb[["prev_coupon", "next_coupon"]] = (
-        df_comb.apply(
-            lambda r: pd.Series(
-                get_coupon_bounds(
-                    r["firstInterestPaymentDate"],
-                    r["years_to_maturity"],
-                    r["original_maturity"]
-                )
-            ), axis=1
-        )
-    )
+        if pd.notna(row["prev_coupon"]) and pd.notna(row["next_coupon"]) else None,axis=1)
 
-    df_comb["conversion_factor"] = df_comb.apply(lambda row: round(
-        compute_cf(
-            row["coupon"],
-            row["prev_coupon"],
-            row["next_coupon"],
-            row["maturity_date"]
-        ), 6
-    ) if pd.notna(row["prev_coupon"]) and pd.notna(row["next_coupon"]) else None, axis=1)
+    cols_to_drop = [
+        "issue_date_raw", "issue_date_x", "prev_coupon_str", "next_coupon_str", "maturity_str", "maturityDate", "interestRate",
+        "refCpiOnIssueDate", "refCpiOnDatedDate", "announcementDate", "auctionDateYear", "datedDate", "accruedInterestPer1000", "accruedInterestPer100",
+        "adjustedAccruedInterestPer1000", "adjustedPrice", "allocationPercentageDecimals", "announcedCusip", "auctionFormat", "averageMedianDiscountRate",
+        "averageMedianInvestmentRate", "averageMedianPrice", "averageMedianDiscountMargin", "callDate", "calledDate", "cashManagementBillCMB",
+        "closingTimeCompetitive", "closingTimeNoncompetitive", "competitiveAccepted", "competitiveBidDecimals", "competitiveTendered",
+        "competitiveTendersAccepted", "cpiBaseReferencePeriod", "currentlyOutstanding", "directBidderAccepted", "directBidderTendered",
+        "estimatedAmountOfPubliclyHeldMaturingSecuritiesByType", "fimaIncluded", "fimaNoncompetitiveAccepted", "fimaNoncompetitiveTendered",
+        "firstInterestPeriod", "frnIndexDeterminationDate", "frnIndexDeterminationRate", "highDiscountRate", "highInvestmentRate",
+        "highPrice", "highDiscountMargin", "highYield", "indexRatioOnIssueDate", "interestPaymentFrequency", "lowDiscountRate",
+        "lowInvestmentRate", "lowPrice", "lowDiscountMargin", "lowYield", "minimumBidAmount", "minimumStripAmount", "minimumToIssue", "multiplesToBid",
+        "multiplesToIssue", "nlpExclusionAmount", "nlpReportingThreshold", "originalCusip", "originalDatedDate", "originalIssueDate", "pdfFilenameAnnouncement",
+        "pdfFilenameCompetitiveResults", "pdfFilenameNoncompetitiveResults", "pdfFilenameSpecialAnnouncement", "pricePer100",
+        "reopening", "securityTermDayMonth", "securityTermWeekYear", "spread", "standardInterestPaymentPer1000", "strippable", "term", "tiinConversionFactorPer1000",
+        "tips", "type", "unadjustedAccruedInterestPer1000", "unadjustedPrice", "updatedTimestamp", "xmlFilenameAnnouncement", "xmlFilenameCompetitiveResults",
+        "xmlFilenameSpecialAnnouncement", "tintCusip2", "tintCusip1DueDate", "tintCusip2DueDate", "issue_date_y", 'maturityDate'
+    ]
 
-    cols_to_drop = ["issue_date_raw","issue_date_x","prev_coupon_str","next_coupon_str","maturity_str","maturityDate","interestRate",
-                    "refCpiOnIssueDate","refCpiOnDatedDate","announcementDate","auctionDateYear","datedDate","accruedInterestPer1000","accruedInterestPer100",
-                    "adjustedAccruedInterestPer1000","adjustedPrice","allocationPercentageDecimals","announcedCusip","auctionFormat","averageMedianDiscountRate",
-                    "averageMedianInvestmentRate","averageMedianPrice","averageMedianDiscountMargin","callDate","calledDate","cashManagementBillCMB",
-                    "closingTimeCompetitive","closingTimeNoncompetitive","competitiveAccepted","competitiveBidDecimals","competitiveTendered",
-                    "competitiveTendersAccepted","cpiBaseReferencePeriod", "currentlyOutstanding","directBidderAccepted","directBidderTendered",
-                    "estimatedAmountOfPubliclyHeldMaturingSecuritiesByType","fimaIncluded","fimaNoncompetitiveAccepted","fimaNoncompetitiveTendered",
-                    "firstInterestPeriod","frnIndexDeterminationDate","frnIndexDeterminationRate","highDiscountRate","highInvestmentRate",
-                    "highPrice","highDiscountMargin","highYield","indexRatioOnIssueDate","interestPaymentFrequency","lowDiscountRate",
-                    "lowInvestmentRate","lowPrice","lowDiscountMargin","lowYield","minimumBidAmount","minimumStripAmount","minimumToIssue","multiplesToBid",
-                    "multiplesToIssue","nlpExclusionAmount","nlpReportingThreshold","originalCusip","originalDatedDate","originalIssueDate","pdfFilenameAnnouncement",
-                    "pdfFilenameCompetitiveResults","pdfFilenameNoncompetitiveResults","pdfFilenameSpecialAnnouncement","pricePer100",
-                    "reopening","securityTermDayMonth","securityTermWeekYear","spread","standardInterestPaymentPer1000","strippable","term","tiinConversionFactorPer1000",
-                    "tips","type","unadjustedAccruedInterestPer1000","unadjustedPrice","updatedTimestamp","xmlFilenameAnnouncement","xmlFilenameCompetitiveResults",
-                    "xmlFilenameSpecialAnnouncement","tintCusip2","tintCusip1DueDate","tintCusip2DueDate","issue_date_y",'maturityDate'
-                    ]
-
-    df_comb.drop(columns=cols_to_drop, inplace=True, errors="ignore")
-    df_comb.to_csv(output_path, index=False)
+    df_parse.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+    df_parse.to_csv(output_path, index=False)
     print(f"Enriched file written to: {output_path}")
 
 if __name__ == "__main__":

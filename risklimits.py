@@ -1,20 +1,17 @@
 import logging
 import sys
 import os
-from idlelib.configdialog import changes
-
 import numpy as np
 import pandas as pd
 import requests
 import urllib3
-from scipy.stats import norm
 import datetime
 from datetime import datetime, timedelta
-
 import config
 from config import ORDERS
 from fixed_income_calc import approximate_convexity, approximate_duration
 from leaky_bucket import leaky_bucket
+
 
 # Global accumulator for overlayA
 duration_register = pd.DataFrame(columns=['NET_OVERLAY'])
@@ -118,36 +115,24 @@ def compute_risk_metrics(ORDERS):
     print("Starting risk metrics computation...")
 
     orders_df = pd.DataFrame(config.ORDERS).copy()
-    global duration_register
 
     for idx, row in orders_df.iterrows():
-        # duration + DV01 + overlayA calculations [unchanged for brevity]
+        pos_sz = {"ZQ": 417000, "ZT": 200000, "Z3N": 200000, "ZF": 100000, "ZN": 100000, "TN": 100000}
 
         # Assume overlayA is computed as below (context retained from earlier message)
-        front_multiplier = row['A_FUT_MULTIPLIER']
-        back_multiplier = row['B_FUT_MULTIPLIER']
-        front_contract_value = row['A_FUT_TPRICE']
-        back_contract_value = row['B_FUT_TPRICE']
+        front_contract_value = pos_sz.get(row['A_MARKETSYMBOL'], 0)
+        back_contract_value = pos_sz.get(row['B_MARKETSYMBOL'], 0)
         front_ratio = row["A_Q_Value"]
         back_ratio = row["B_Q_Value"]
         front_dv01 = row['A_FUT_DV01']
         back_dv01 = row['B_FUT_DV01']
-
-        net_contract_value = (front_multiplier * front_contract_value * front_ratio +
-                              back_multiplier * back_contract_value * back_ratio)
-
-        overlayA = round((front_dv01 * front_ratio * front_multiplier  * front_ratio +
-                          back_dv01 * back_ratio * back_multiplier * back_ratio), 8)
-
+        basis = row['sp_cal']
+        net_pos_value = (front_contract_value + back_contract_value)
+        overlayA = round((front_dv01 * front_ratio * front_contract_value +
+                          back_dv01 * back_ratio * back_contract_value), 8)
         orders_df.at[idx, 'NET_OVERLAY'] = overlayA
-
-        # Append to global accumulator
-        duration_register.loc[len(duration_register)] = [overlayA]
-
-        orders_df.at[idx, 'EQUITY_DELTA'] = round((overlayA / net_contract_value), 7)
-
-    # After loop, compute total overlay
-    config.TOTAL_OVERLAY = duration_register['NET_OVERLAY'].sum()
+        orders_df.at[idx, 'EQUITY_DELTA'] = round((overlayA / net_pos_value), 7)
+        orders_df.at[idx, 'TOTAL_BASIS'] = basis * net_pos_value/100000
 
     print("Final computed ORDERS:")
     print(orders_df)

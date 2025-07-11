@@ -8,9 +8,9 @@ import time
 import requests
 import pandas as pd
 from datetime import datetime
+from scan import pop_zeroes
 from zeroes import fetch_treasury_data
 import config
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # IBKR gateway helper
@@ -23,7 +23,6 @@ def is_logged_in(sess: requests.Session) -> bool:
     except Exception as exc:
         print("Login-status check failed:", exc)
         return False
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Fetch CTD Basket List from CME Group
@@ -51,7 +50,6 @@ def download_tcf_file() -> str:
         f.write(r.content)
     print("Saved:", out_path)
     return out_path
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Ping Treasury for Detailed SecDef. Derive Dirty CF-Client. Ping IBKR for Contract #
@@ -130,7 +128,7 @@ def run_scraper() -> None:
 
     print(ust_df.head())
 
-
 # ────────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    pop_zeroes()
     run_scraper()
