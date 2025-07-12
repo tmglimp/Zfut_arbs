@@ -1,6 +1,6 @@
 ##### Zfut_arbs.py #####
 
-This futures arbitrage algorithm has the right parts to satisfy Volcker quant's risk-mitigating hedging rules with {ZT,Z3N,ZF,ZN,TN} spread pairs.* CME/CBOT recognizes orders that emerge from the algo as legged spreads or covered UDS recursions.
+This futures arbitrage algorithm has the right parts to satisfy Volcker quant's risk-mitigating hedging rules with {ZT,Z3N,ZF} spread pairs.* CME/CBOT recognizes orders that emerge from the algo as legged spreads or covered UDS recursions.
 
 **Dependencies**
 
@@ -16,4 +16,4 @@ Big thanks to the U. IL at Chicago's MSc-Fin staff and especially Mr. John Mille
 7.11.2025.
 
 *This opinion is premised upon conveyances from a Goldman Sachs FIS trade desk alum. It is not intended to constitute legal advice, nor should it be relied upon as such.
-HJM 0 curve coming soon.
+HJM 0 curve and microtreasury hedging coming soon.
