@@ -6,8 +6,8 @@ from datetime import datetime
 from scan import pop_zeroes
 
 # ─── Configuration ───
-client_id = "82c5ee299b404f62af1177b109377ea6"
-client_secret = "63534e01479F4328b43D41a08fc37C2a"
+client_id = ""
+client_secret = ""
 tcf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TCF.xlsx")
 output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "UST.index.csv")
 
