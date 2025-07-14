@@ -3,10 +3,11 @@ import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from scan import pop_zeroes
 
 # ─── Configuration ───
-client_id = ""
-client_secret = ""
+client_id = "82c5ee299b404f62af1177b109377ea6"
+client_secret = "63534e01479F4328b43D41a08fc37C2a"
 tcf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TCF.xlsx")
 output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "UST.index.csv")
 
@@ -68,12 +69,12 @@ def compute_cf(coupon_rate, prev_cpn, next_cpn, mat_date, yield_rate=0.06):
     pv += final_cash / ((1 + r) ** t_last)
     return pv / 100.0
 
-def get_coupon_bounds(firstInterestPaymentDate, years_to_maturity, original_maturity):
-    if pd.isna(firstInterestPaymentDate) or pd.isna(years_to_maturity) or pd.isna(original_maturity):
+def get_coupon_bounds(issueDate, years_to_maturity, original_maturity):
+    if pd.isna(issueDate) or pd.isna(years_to_maturity) or pd.isna(original_maturity):
         return None, None
 
     try:
-        anchor = parse_date(firstInterestPaymentDate)
+        anchor = parse_date(issueDate)
     except:
         return None, None
 
@@ -132,11 +133,11 @@ def fetch_treasury_data():
     df_parse = df.merge(df_results, on="cusip", how="left")
     df_parse = df_parse.loc[:, ~df_parse.columns.duplicated()]
 
-    df_parse["firstInterestPaymentDate"] = pd.to_datetime(df_parse["firstInterestPaymentDate"], errors="coerce")
-    df_parse["firstInterestPaymentDate"] = df_parse["firstInterestPaymentDate"].dt.strftime("%Y-%m-%d")
+    df_parse["issueDate"] = pd.to_datetime(df_parse["issueDate"], errors="coerce")
+    df_parse["issueDate"] = df_parse["issueDate"].dt.strftime("%Y-%m-%d")
     df_parse["maturity_date"] = pd.to_datetime(df_parse["maturity_date"], errors="coerce")
     df_parse["maturity_date"] = df_parse["maturity_date"].dt.strftime("%Y-%m-%d")
-    df_parse[["prev_coupon", "next_coupon"]] = df_parse.apply(lambda r: pd.Series(get_coupon_bounds(r["firstInterestPaymentDate"], r["years_to_maturity"], r["original_maturity"])),axis=1)
+    df_parse[["prev_coupon", "next_coupon"]] = df_parse.apply(lambda r: pd.Series(get_coupon_bounds(r["issueDate"], r["years_to_maturity"], r["original_maturity"])),axis=1)
     df_parse["conversion_factor"] = df_parse.apply(lambda row: round(compute_cf(row["coupon"], row["prev_coupon"], row["next_coupon"], row["maturity_date"]), 6)
 
         if pd.notna(row["prev_coupon"]) and pd.notna(row["next_coupon"]) else None,axis=1)
@@ -160,7 +161,10 @@ def fetch_treasury_data():
     ]
 
     df_parse.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+    df_parse = df_parse[df_parse['corpusCusip'].notna() & (df_parse['corpusCusip'] != '')]
     df_parse.to_csv(output_path, index=False)
+
+
     print(f"Enriched file written to: {output_path}")
 
 if __name__ == "__main__":
